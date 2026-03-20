@@ -9,13 +9,13 @@ def run_bit_flipping_attack():
     key = generate_key(16)
     iv = generate_iv()
 
-    plaintext = b"userdata=alice;admin=false;"
+    plaintext = b"userdata=alice; admin=false;"
     _, ciphertext = aes_cbc_encrypt(key, plaintext, iv)
 
     print(f"Original plaintext : {plaintext}")
 
     tampered = bytearray(ciphertext)
-    base = 21 - BLOCK_SIZE
+    base = 22 - BLOCK_SIZE
 
     tampered[base]     ^= ord('f') ^ ord('t')
     tampered[base + 1] ^= ord('a') ^ ord('r')
