@@ -1,5 +1,7 @@
 from aes_modes import aes_cbc_encrypt, aes_cbc_decrypt, generate_key, generate_iv
 
+BLOCK_SIZE = 16
+
 
 def padding_oracle(key, iv, ciphertext):
     try:
@@ -9,32 +11,76 @@ def padding_oracle(key, iv, ciphertext):
         return False
 
 
+def attack_block(key, prev_block, target_block):
+    intermediate = bytearray(BLOCK_SIZE)
+
+    for byte_idx in range(BLOCK_SIZE - 1, -1, -1):
+        pad_val = BLOCK_SIZE - byte_idx
+
+        tampered = bytearray(BLOCK_SIZE)
+        for k in range(byte_idx + 1, BLOCK_SIZE):
+            tampered[k] = intermediate[k] ^ pad_val
+
+        found = False
+        for guess in range(256):
+            tampered[byte_idx] = guess
+
+            if not padding_oracle(key, bytes(tampered), target_block):
+                continue
+
+            if byte_idx == BLOCK_SIZE - 1:
+                confirm = bytearray(tampered)
+                confirm[byte_idx - 1] ^= 0x01
+                if not padding_oracle(key, bytes(confirm), target_block):
+                    continue
+
+            intermediate[byte_idx] = guess ^ pad_val
+            found = True
+            break
+
+        if not found:
+            raise RuntimeError(f"Could not recover byte at index {byte_idx}")
+
+    recovered = bytearray(BLOCK_SIZE)
+    for i in range(BLOCK_SIZE):
+        recovered[i] = intermediate[i] ^ prev_block[i]
+
+    return bytes(recovered)
+
+
 def run_padding_oracle_attack():
-    print("AES-CBC Padding Oracle Attack")
+    print("--- AES-CBC Padding Oracle Attack ---")
 
     key = generate_key(16)
     iv = generate_iv()
 
-    secret = b"Secret!!"
+    secret = b"Padding oracle attacks are dangerous!"
     _, ciphertext = aes_cbc_encrypt(key, secret, iv)
 
-    print("Guessing the last plaintext byte via oracle")
+    num_blocks = len(ciphertext) // BLOCK_SIZE
+    blocks = [ciphertext[i * BLOCK_SIZE : (i + 1) * BLOCK_SIZE]
+              for i in range(num_blocks)]
 
-    found = None
-    for guess in range(256):
-        tampered_iv = bytearray(iv)
-        tampered_iv[15] = iv[15] ^ guess ^ 0x01
+    print(f"Ciphertext length : {len(ciphertext)} bytes ({num_blocks} blocks)")
+    print("Recovering plaintext byte-by-byte ...\n")
 
-        if padding_oracle(key, bytes(tampered_iv), ciphertext):
-            found = guess
-            label = chr(guess) if guess > 31 else "non-printable"
-            print(f"Oracle OK for guess={guess} ('{label}')")
-            break
+    recovered = bytearray()
+    for block_num in range(num_blocks):
+        prev = iv if block_num == 0 else blocks[block_num - 1]
+        plain_block = attack_block(key, prev, blocks[block_num])
+        recovered.extend(plain_block)
+        print(f"  Block {block_num + 1}/{num_blocks} recovered")
 
-    if found == 0x08:
-        print("Result: Success — recovered the padding byte 0x08.")
+    pad_len = recovered[-1]
+    plaintext = bytes(recovered[:-pad_len])
+
+    print(f"\nRecovered plaintext: {plaintext}")
+    print(f"Original  plaintext: {secret}")
+
+    if plaintext == secret:
+        print("Result: Success — full plaintext recovered via oracle.")
     else:
-        print("Result: Fail")
+        print("Result: Failed.")
 
 
 if __name__ == "__main__":
